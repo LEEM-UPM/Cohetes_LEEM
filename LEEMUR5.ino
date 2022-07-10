@@ -840,6 +840,7 @@ void gps_wait_signal(int tiempo) {
   uint32_t start;
   start = millis();
   while (true) {
+    gps_read();
     sign_ok = (abs(GPS_LAT) < 90.0 && abs(GPS_LON) < 90.0);
     if (sign_ok && (millis() > (tiempo + start)) ) {
       break;
