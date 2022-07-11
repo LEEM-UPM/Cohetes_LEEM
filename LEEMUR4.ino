@@ -34,7 +34,7 @@
 //              Parámetros Cohete
 //-------------------------------------------------
 #define ACC_START             2.0          // g
-#define T_MIN_PARACAIDAS      4000         // ms
+#define T_MIN_PARACAIDAS      6000         // ms
 #define T_MAX_PARACAIDAS      14500        // ms (Superior siempre a T_MAX_PARACAIDAS)
 #define T_OFF_PARACAIDAS      30000        // ms
 #define DIF_ALTURA_APERTURA   15.0         // m
@@ -289,15 +289,15 @@ void setup() {
   Wire.begin();
   delay(50);
 
-  /*
+/*
     // Lectura de datos I2C
     digitalWrite(PIN_LED_READY, 1);
     EEPROM_I2C_Lectura_datos();
     while (true) {
       delay(1);
     }
-  */
-
+*/
+ 
   if (!KX134_64g_init()) {
 #if DEBUG == 1
     Serial.println("Error KX134");
@@ -355,7 +355,7 @@ void setup() {
 #if DEBUG == 1
   Serial.println("Start OK, waiting for GPS valid signal");
 #endif
-  //gps_wait_signal(1000); // Experimental
+  gps_wait_signal(10000); // Experimental
 
 
   // 2.2 ESPERA AL ARMADO DE ELECROIMANES:
@@ -841,6 +841,7 @@ void gps_wait_signal(int tiempo) {
   uint32_t start;
   start = millis();
   while (true) {
+    gps_read();
     sign_ok = (abs(GPS_LAT) < 90.0 && abs(GPS_LON) < 90.0);
     if (sign_ok && (millis() > (tiempo + start)) ) {
       break;
@@ -871,6 +872,7 @@ void gps_read() {
     byte auxb = 0;
     gps.f_get_position(&GPS_LAT, &GPS_LON);
     gps.crack_datetime(&auxi, &auxb, &auxb, &GPS_HOU, &GPS_MIN, &GPS_SEC);
+    GPS_HOU+=2;
     GPS_ALT = gps.f_altitude();
     GPS_VEL = gps.f_speed_kmph();
     GPS_SAT = gps.satellites();
