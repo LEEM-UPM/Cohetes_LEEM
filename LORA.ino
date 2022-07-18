@@ -1,4 +1,6 @@
 #include <Wire.h>
+#include <Adafruit_BMP280.h>
+#include "Arduino.h"
 #include "heltec.h"
 #include <TinyGPS.h>
 //#include "images.h"
@@ -6,15 +8,18 @@
 // Librerias para los Servos, Servo.h no es compatible
 #include <ESP32Servo.h>  // John K. Bennett
 
+// Instalar SoftwareSerial.h para Lora:
+// https://github.com/plerup/espsoftwareserial/blob/main/library.json
+// (EspSoftwareSerial) by Dirk Kaar and Peter Lerup
+#include <SoftwareSerial.h>
 
-// Posible 
-// https://github.com/junhuanchen/Esp32-SoftwareSerial/blob/master/examples/main.cpp
-// #include <HardwareSerial.h>
 
 // Código hecho por Andrés
 
-// Telemetría
-#define BAND    433E6
+
+// Modo depuración (Dar información por el puerto serie)
+#define DEBUG 1
+
 
 
 
@@ -68,13 +73,16 @@ boolean fin_paracaidas = false;
 //-------------------------------------------------
 //             Declaración de pines
 //-------------------------------------------------
-#define PIN_LED_ERROR     5
-#define PIN_LED_READY     21
+#define PIN_LED_ERROR     21
+#define PIN_LED_READY     25
+#define PIN_LED_BUITLT_IN 25
 #define PIN_ZUMBADOR      12
 #define PIN_GPS_TX        2
 #define PIN_GPS_RX        17
 #define PIN_SERVOS        13
 #define PIN_LM35          36
+#define PIN_ALARMA        12
+#define PIN_SERVOS        13
 
 
 
@@ -84,15 +92,31 @@ boolean fin_paracaidas = false;
 //-------------------------------------------------
 
 #define PIN_LM35 36
-#define LED_LORA 25
 
 
+// Telemetría
+#define BAND    433E6
 unsigned int counter = 0;
 String rssi = "RSSI --";
 String packSize = "--";
 String packet ;
 
+
+// ADXL345
+const int ADXL345 = 0x3C; // Direccion I2C
+const int MPU6050 = 0x68; // Direccion I2C
+float X_out, Y_out, Z_out;
+#define OFFSET_X 0.00
+#define OFFSET_Y 0.00
+#define OFFSET_Z 0.00
+
+
+// LM35
 float temperatura_LM35;
+
+
+// Presion
+Adafruit_BMP280 bmp;
 
 
 // Servomotores:
@@ -105,17 +129,112 @@ int maxUs = 2000;
 #define EEPROM_I2C_ADDRESS 0x50
 uint16_t eeprom_mem = 0;
 
+// Sotware serial:
+SoftwareSerial ss;
+#define SS_BAUD_RATE 9600
+#define SS_BUFFER    128
+
+// GPS
+float GPS_LON = TinyGPS::GPS_INVALID_ANGLE;
+float GPS_LAT = TinyGPS::GPS_INVALID_ANGLE;
+float GPS_ALT;
+float GPS_VEL;
+uint8_t GPS_SEC;
+uint8_t GPS_MIN;
+uint8_t GPS_HOU;
+uint8_t GPS_SAT;
+
+
+
+// Variables
+float T_BMP;
+float Altitud_BMP;
+float Presion_BMP;
+
+
+
 
 void setup()
 {
 
   // 0. DECLARACIONES
+#if DEBUG == 1
   Serial.print(115200);
+#endif
+  pinMode(PIN_LED_ERROR, OUTPUT);
+  pinMode(PIN_LED_READY, OUTPUT);
+
+
+
+  digitalWrite(PIN_LED_ERROR, HIGH);
+  delay(1000);
+
 
 
   // 1. INICIALIZACION Y TEST DE FUNCIONAMIENTO
   lora_init();
   paracaidas_init();
+
+  // Wire.begin para todos los modulos
+  Wire.begin(SDA_OLED, SCL_OLED);
+  Wire.setClock(100000);
+  delay(50);
+
+
+  if (!bmp.begin()) {
+#if DEBUG == 1
+    Serial.println("Error BMP280");
+#endif
+    // Error
+  }
+
+
+  if (!ADXL345_16g_init()) {
+#if DEBUG == 1
+    Serial.println("Error ADXL345");
+#endif
+    // Error
+  }
+
+
+  if (!MPU6050_16g_init()) {
+#if DEBUG == 1
+    Serial.println("Error ADXL345");
+#endif
+    // Error
+  }
+
+
+  if(!ss_init(SS_BAUD_RATE, SS_BUFFER)){
+#if DEBUG == 1
+    Serial.println("Error Sofware Serial");
+#endif
+    // Error
+  }
+
+
+  if(!gps_init_G28U7FTTL()){
+#if DEBUG == 1
+    Serial.println("Error GPS");
+#endif
+    // Error
+  }
+
+
+
+
+  // 2. BUSQUEDA DE SEÑAL GPS
+
+
+  while(true){
+    digitalWrite(PIN_LED_ERROR, 1);
+    digitalWrite(PIN_LED_READY, 1);
+    delay(1000);
+    digitalWrite(PIN_LED_ERROR, 0);
+    digitalWrite(PIN_LED_READY, 0);
+    delay(1000);
+  }
+  
 
 
   delay(1000);
@@ -125,52 +244,223 @@ void setup()
 void loop()
 {
 
-  paracaidas_open();
-  delay(1000);
-  paracaidas_close();
-  delay(1000);
-
-
   /*
-  temperatura_LM35 = analogRead(PIN_LM35);
-  temperatura_LM35 = temperatura_LM35 * 0.088058;
-  Serial.println(temperatura_LM35);
-  //connvertimos a char
-  char tempstring[20];
-  dtostrf(temperatura_LM35, 3, 1, tempstring);
-
-  String temperatura(tempstring);
-
-
-
-  Heltec.display->clear();
-  Heltec.display->setTextAlignment(TEXT_ALIGN_LEFT);
-  Heltec.display->setFont(ArialMT_Plain_10);
-
-  Heltec.display->drawString(0, 0, "Sending packet: ");
-  Heltec.display->drawString(90, 0, String(temperatura));
-  Heltec.display->display();
-
-
-
-
-  counter++;
-  digitalWrite(LED_LORA, HIGH);   // turn the LED on (HIGH is the voltage level)
-  delay(1000);                       // wait for a second
-  digitalWrite(LED_LORA, LOW);    // turn the LED off by making the voltage LOW
-  delay(1000);                     // wait for a second
+    gps_read();
+    Toma_de_datos();
+    delay(200);
   */
 
+  if(ss.available()){
+    Serial.write(ss.read());
+  }
+
+
+
   
+
+  /*
+    temperatura_LM35 = analogRead(PIN_LM35);
+    temperatura_LM35 = temperatura_LM35 * 0.088058;
+    Serial.println(temperatura_LM35);
+    //connvertimos a char
+    char tempstring[20];
+    dtostrf(temperatura_LM35, 3, 1, tempstring);
+
+    String temperatura(tempstring);
+
+
+
+    Heltec.display->clear();
+    Heltec.display->setTextAlignment(TEXT_ALIGN_LEFT);
+    Heltec.display->setFont(ArialMT_Plain_10);
+
+    Heltec.display->drawString(0, 0, "Sending packet: ");
+    Heltec.display->drawString(90, 0, String(temperatura));
+    Heltec.display->display();
+
+
+
+
+    counter++;
+    digitalWrite(LED_LORA, HIGH);   // turn the LED on (HIGH is the voltage level)
+    delay(1000);                       // wait for a second
+    digitalWrite(LED_LORA, LOW);    // turn the LED off by making the voltage LOW
+    delay(1000);                     // wait for a second
+  */
+
+
 }
 
 
 
 
 
-/********************************************************
-                 PARACAIDAS Y ZUMBADOR
-*********************************************************/
+
+void Toma_de_datos() {
+
+  // Lectura de datos:
+  T_BMP = bmp.readTemperature();
+  Presion_BMP = bmp.readPressure();
+  Altitud_BMP = bmp.readAltitude();
+  //ADXL345_16g_read_acc();
+  MPU6050_16g_read_raw();
+  //gps_read();
+
+  // Temperatura LM35
+  //T_EXT = (float)analogRead(PIN_LM35);
+  //T_EXT = T_EXT * 0.488759;
+
+
+  // Datos serie (solo DEBUG)
+#if DEBUG == 1
+  /*
+  Serial.print(X_out);
+  Serial.write('\t');
+  Serial.print(Y_out);
+  Serial.write('\t');
+  Serial.print(Z_out);
+  Serial.write('\t');
+  Serial.print(T_EXT);
+  Serial.write('\t');
+  Serial.print(Presion_BMP);
+  Serial.write('\t');
+  Serial.print(Altitud_BMP);
+  Serial.write('\t');
+  Serial.print(T_BMP);
+  Serial.write('\n');
+  */
+    Serial.print(GPS_ALT);
+    Serial.write('\t');
+    Serial.print(GPS_LAT);
+    Serial.write('\t');
+    Serial.print(GPS_LON);
+    Serial.write('\t');
+    Serial.print(GPS_HOU);
+    Serial.write(':');
+    Serial.print(GPS_MIN);
+    Serial.write(':');
+    Serial.print(GPS_SEC);
+    Serial.write('\t');
+    Serial.print(GPS_SAT);
+    Serial.write('\n');
+
+    /*
+    Serial.print(!digitalRead(PIN_HALL));
+    Serial.write('\n');
+    */
+#endif
+
+
+  /*
+    // EEPROM I2C
+    if (start) {
+    EEPROM_I2C_Almacena_datos();
+    }
+  */
+
+  // Tarjeta SD
+  // SD_Almacena_datos();
+
+
+  // EEPROM INTERNA (si procede cada T_ALMACENAMIENTO)
+  // EEPROM_Almacena_datos();
+
+}
+
+
+//-------------------------------------------------
+//             Software Serial y GPS
+//-------------------------------------------------
+
+boolean ss_init(uint32_t baud, int buffer_len){
+  ss.begin(baud, SWSERIAL_8N1, PIN_GPS_TX, PIN_GPS_RX, false, buffer_len);
+  if(!ss){
+    return false;
+  }
+  return true;
+}
+
+
+boolean gps_init_G28U7FTTL() {
+
+  // Configuración GPS G28U7FTTL
+
+  // Solo NMEA GGA
+  ss.println("$PUBX,40,GLL,0,0,0,0*5C");
+  ss.println("$PUBX,40,ZDA,0,0,0,0*44");
+  ss.println("$PUBX,40,VTG,0,0,0,0*5E");
+  ss.println("$PUBX,40,GSV,0,0,0,0*59");
+  ss.println("$PUBX,40,GSA,0,0,0,0*4E");
+  ss.println("$PUBX,40,RMC,0,0,0,0*47");
+  ss.flush();
+  delay(100);
+  
+  // 10Hz DataRate
+  ss.println("\xB5\x62\x06\x08\x06\x00\xC8\x00\x01\x00\x01\x00\xDE\x6A");
+  
+  return 1;
+}
+
+
+void gps_wait_signal() {
+  while (abs(GPS_LAT) > 90.0 || abs(GPS_LON) > 90.0) {
+    gps_read();
+    //delay(100);
+  }
+
+#if DEBUG == 1
+  Serial.println("GPS signal OK");
+#endif
+}
+
+
+// Funcion sobrecargada para asegurarse que la senal GPS se mantiene por "tiempo"
+void gps_wait_signal(int tiempo) {
+  boolean sign_ok = false;
+  uint32_t start;
+  start = millis();
+  while (true) {
+    gps_read();
+    sign_ok = (abs(GPS_LAT) < 90.0 && abs(GPS_LON) < 90.0);
+    if (sign_ok && (millis() > (tiempo + start)) ) {
+      break;
+    }
+    if (!sign_ok) {
+      start = millis();
+    }
+  }
+
+#if DEBUG == 1
+  Serial.println("GPS signal OK");
+#endif
+}
+
+
+
+void gps_read() {
+  TinyGPS gps;
+  char var = -1;
+
+  while (ss.available()) {
+    var = ss.read();
+    gps.encode(var);
+  }
+
+  if (var != -1) {
+    int auxi = 0;
+    byte auxb = 0;
+    gps.f_get_position(&GPS_LAT, &GPS_LON);
+    gps.crack_datetime(&auxi, &auxb, &auxb, &GPS_HOU, &GPS_MIN, &GPS_SEC);
+    GPS_ALT = gps.f_altitude();
+    GPS_VEL = gps.f_speed_kmph();
+    GPS_SAT = gps.satellites();
+    GPS_HOU = GPS_HOU + 2;
+  }
+}
+
+//-------------------------------------------------
+//              PARACAIDAS Y ZUMBADOR
+//-------------------------------------------------
 
 void paracaidas_open() {
   servos.write(170);
@@ -190,15 +480,101 @@ void zumbador_off() {
   digitalWrite(PIN_ZUMBADOR, 1);
 }
 
-void paracaidas_init(){
+void paracaidas_init() {
   ESP32PWM::allocateTimer(0);
   ESP32PWM::allocateTimer(1);
   ESP32PWM::allocateTimer(2);
   ESP32PWM::allocateTimer(3);
   servos.setPeriodHertz(50);      // Standard 50hz servo
+  servos.attach(PIN_SERVOS, 500, 2400);
 }
 
 
+//-------------------------------------------------
+//                   ADXL345
+//-------------------------------------------------
+
+void ADXL345_16g_read_acc() {
+  // === Read acceleromter data === //
+  Wire.beginTransmission(ADXL345);
+  Wire.write(0x32);
+  Wire.endTransmission(false);
+  Wire.requestFrom(ADXL345, 6, true);
+  X_out = ( Wire.read() | Wire.read() << 8);
+  X_out = X_out / 32 - OFFSET_X;
+  Y_out = ( Wire.read() | Wire.read() << 8);
+  Y_out = Y_out / 32 - OFFSET_Y;
+  Z_out = ( Wire.read() | Wire.read() << 8);
+  Z_out = Z_out / 32 - OFFSET_Z;
+}
+
+boolean ADXL345_16g_init() {
+
+  Wire.beginTransmission(ADXL345);
+  if (Wire.endTransmission() == 2) {
+    return 0;
+  }
+
+  // Inicio de la comunicación
+  Wire.beginTransmission(ADXL345);
+  Wire.write(0x2D);
+  Wire.write(8);
+  Wire.endTransmission();
+  delay(10);
+
+  // Rango máximo +-16g
+  Wire.beginTransmission(ADXL345);
+  Wire.write(0x31);
+  Wire.write(B00000011);
+  Wire.endTransmission();
+
+  return 1;
+}
+
+
+
+//-------------------------------------------------
+//                   MPU6050
+//-------------------------------------------------
+
+void MPU6050_16g_read_raw() {
+
+  Wire.beginTransmission(MPU6050);
+  Wire.write(0x3B); // Registro I2C
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU6050, 6, true);
+  X_out = (float)(Wire.read() << 8 | Wire.read());
+  X_out = (X_out / 2048) - OFFSET_X;
+  Y_out = (float)(Wire.read() << 8 | Wire.read());
+  Y_out = (Y_out / 2048) - OFFSET_Y;
+  Z_out = (float)(Wire.read() << 8 | Wire.read());
+  Z_out = (Z_out / 2048) - OFFSET_Z;
+
+  /*
+    Wire.beginTransmission(MPU6050);
+    Wire.write(0x43); // Registro I2C
+    Wire.endTransmission(false);
+    Wire.requestFrom(MPU6050, 6, true);
+    RX_out = (float)( Wire.read() << 8 | Wire.read());
+    RY_out = (float)( Wire.read() << 8 | Wire.read());
+    RZ_out = (float)( Wire.read() << 8 | Wire.read());
+  */
+}
+
+boolean MPU6050_16g_init() {
+
+  Wire.beginTransmission(MPU6050);
+  if (Wire.endTransmission() == 2) {
+    return 0;
+  }
+
+  // Rango máximo +-16g
+  Wire.beginTransmission(MPU6050);
+  Wire.write(0x1C);
+  Wire.write(B00011000);
+  Wire.endTransmission();
+  return 1;
+}
 
 
 //-------------------------------------------------
@@ -272,14 +648,14 @@ void EEPROM_I2C_Almacena_datos() {
     byte paquete[30];  // No se pueden guardar paquetes superiores a 30 bytes, se llena el buffer I2C
     uint16_t aux = FLIGHT_TIME;
     /*
-    uint16_to_2byte(aux, &(paquete[0]));
-    float_to_4byte(&Z_out, &(paquete[2]));
-    float_to_4byte(&X_out, &(paquete[6]));
-    float_to_4byte(&Y_out, &(paquete[10]));
-    float_to_4byte(&Presion_BMP, &(paquete[14]));
-    float_to_4byte(&Altitud_BMP, &(paquete[18]));
-    float_to_4byte(&GPS_LAT, &(paquete[22]));
-    float_to_4byte(&GPS_LON, &(paquete[26]));
+      uint16_to_2byte(aux, &(paquete[0]));
+      float_to_4byte(&Z_out, &(paquete[2]));
+      float_to_4byte(&X_out, &(paquete[6]));
+      float_to_4byte(&Y_out, &(paquete[10]));
+      float_to_4byte(&Presion_BMP, &(paquete[14]));
+      float_to_4byte(&Altitud_BMP, &(paquete[18]));
+      float_to_4byte(&GPS_LAT, &(paquete[22]));
+      float_to_4byte(&GPS_LON, &(paquete[26]));
     */
     writeEEPROM_Page(eeprom_mem, paquete, 30);
     eeprom_mem += 30;
@@ -387,4 +763,3 @@ void writeEEPROM(uint16_t address, byte val) {
   Wire.endTransmission();
   delay(5);
 }
-
