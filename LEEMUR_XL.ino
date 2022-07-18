@@ -14,7 +14,7 @@
 
 
 // Modo depuración (Dar información por el puerto serie)
-#define DEBUG 0
+#define DEBUG 1
 
 
 // Lista de dispositivos del Cohete 2 7/ABR/22
@@ -280,8 +280,8 @@ void telem_wait() {
     Presion_BMP = bmp.readPressure();
     Altitud_BMP = bmp.readAltitude();
     MPU9250_read();
-    telem_send();
     velocidad_bmp = read_bmp_vel();
+    telem_send();
 
     // Detectar la c
     if (Serial3.available()) {
@@ -348,17 +348,17 @@ boolean paracaidas_init() {
 
 
 void paracaidas_open() {
-  servo1.write(10);
-  servo2.write(10);
-  servo3.write(10);
-  servo4.write(10);
+  servo1.write(60);
+  servo2.write(60);
+  servo3.write(60);
+  servo4.write(60);
 }
 
 void paracaidas_close() {
-  servo1.write(170);
-  servo2.write(170);
-  servo3.write(170);
-  servo4.write(170);
+  servo1.write(0);
+  servo2.write(0);
+  servo3.write(0);
+  servo4.write(0);
 }
 
 void zumbador_on() {
@@ -855,21 +855,20 @@ void SD_paracaidas() {
 }
 
 
+static float t__o = 0;
+static float al = 0.0;
+static float al_o = 0.0;
+static float vel = 0.0;
+static float vel_f = 0.0;
 float read_bmp_vel() {
-  static float t_o = 0;
-  static float al = 0.0;
-  static float al_o = 0.0;
-  static float vel = 0.0;
-  static float vel_f = 0.0;
 
   al = 0.9 * al + 0.1 * Altitud_BMP;
   al_o = al;
-  vel = (al - al_o) / (((float)(millis())) - t_o);
-  t_o = (float)millis();
+  vel = (al - al_o) / (((float)(millis())) - t__o);
+  t__o = (float)millis();
   vel_f = 0.9 * vel_f + 0.1 * vel;
   return vel_f;
 }
-
 
 
 
@@ -887,6 +886,7 @@ void TCA9548A_select(uint8_t bus)
 boolean pitot_init() {
 
   // Inicializar sensores
+  /*
   TCA9548A_select(6);
   if (! mpr.begin()) {
 #if DEBUG == 1
@@ -894,6 +894,7 @@ boolean pitot_init() {
 #endif
     return false;
   }
+  */
 
   TCA9548A_select(5);
   if (! mpr.begin()){
@@ -905,7 +906,7 @@ boolean pitot_init() {
 
 
   // Inicializar medidas
-  TCA9548A_select(6);
+  TCA9548A_select(5);
   for (uint8_t i = 0; i < 50 ; i++) {
     presion_referencia += mpr.readPressure();
   }
@@ -922,11 +923,14 @@ boolean pitot_init() {
 
 void pitot_read() {
 
+/*
   TCA9548A_select(6);
   presion_remanso = mpr.readPressure() * 100.0;
+*/
 
+  presion_estatica = Presion_BMP;
   TCA9548A_select(5);
-  presion_estatica = mpr.readPressure() * 100.0;
+  presion_remanso = mpr.readPressure() * 100.0;
 
   // Datos de LM35
   temperatura_remanso = analogRead(PIN_LM35) * 0.488759;
