@@ -546,6 +546,7 @@ void SD_Almacena_datos() {
   archivo->write(GPS_HOU);
   archivo->write(GPS_MIN);
   archivo->write(GPS_SEC);
+  archivo->write(GPS_SAT);  // Dato no guardado en 19/JUL/2020, Fallo :-(
   archivo->flush();
 }
 
