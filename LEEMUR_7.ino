@@ -18,7 +18,7 @@
 
 
 // Lista de dispositivos del Cohete 2 7/ABR/22
-// COHETE XBEE LEEMUR XL JUL/22
+// COHETE XBEE LEEMUR 7 JUL/22
 /*
    ADXL377
    MPU9250
